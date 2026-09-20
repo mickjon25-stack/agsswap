@@ -60,6 +60,10 @@ Browser-only auth. On first visit — or after **Log out** / **Reset demo data**
 
 Roles: **Hobby farm** (like RenoSwap Homeowner) and **Ranch / Farm** badge (like Contractor). Admin demo user kept.
 
+**Profile picture** — Account → Edit profile → upload a photo (resized/compressed for localStorage) or use initials. Avatars show on Account, listing posters, messages, and swap offers.
+
+**Sign out** — Account (and topbar) clears the session only (`currentUser = null`). Listings, users, messages, and avatars stay; Sign in restores that user.
+
 ## localStorage schema (`agsswap_db`)
 
 Same shape as RenoSwap’s demo, but key **`agsswap_db`** (RenoSwap uses `renoswap_v1`) so both apps can share a browser without collisions:

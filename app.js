@@ -232,6 +232,7 @@ function blankUserExtras() {
     zip: "",
     bio: "",
     company: "",
+    avatar: "",
     profileComplete: false,
     subscribed: false,
     admin: false,
@@ -252,6 +253,7 @@ const USERS = {
     zip: "77975",
     bio: "Demo hobby-farm account for walkthroughs.",
     company: "",
+    avatar: "",
     profileComplete: true,
     admin: false
   },
@@ -267,6 +269,7 @@ const USERS = {
     zip: "78945",
     bio: "Small acreage — goats, hay, and fence projects.",
     company: "",
+    avatar: "",
     profileComplete: true,
     admin: false
   },
@@ -282,6 +285,7 @@ const USERS = {
     zip: "77984",
     bio: "Working ranch — surplus fencing, hay, and implements.",
     company: "Lavaca River Ranch",
+    avatar: "",
     profileComplete: true,
     admin: false
   },
@@ -297,6 +301,7 @@ const USERS = {
     zip: "78701",
     bio: "Demo admin for listing review.",
     company: "",
+    avatar: "",
     profileComplete: true,
     admin: true
   }
@@ -465,6 +470,7 @@ function normalizeUser(u, id) {
   if (seed && !out.password) out.password = seed.password;
   if (seed && !out.city) out.city = seed.city;
   if (seed && !out.zip) out.zip = seed.zip;
+  if (out.avatar == null || typeof out.avatar !== "string") out.avatar = "";
   return out;
 }
 
@@ -555,6 +561,7 @@ let state = {
   pickOfferedId: null,
   authScreen: "welcome", // welcome | create | signin | demo
   editingProfile: false,
+  avatarDraft: undefined, // undefined = use saved; "" = cleared; data URL = new
   reportTarget: null, // { kind, listingId?, userId? } | null
   filtersOpen: false // mobile browse filters disclosure
 };
@@ -1300,6 +1307,13 @@ function render() {
           }
           <button class="nav-desktop ${state.view === "account" ? "active" : ""}" onclick="go('account')">Account</button>
         </nav>
+        <div class="topbar-user">
+          <button type="button" class="user-chip ${state.view === "account" ? "active" : ""}" onclick="go('account')" title="Account">
+            ${avatarHTML(sessionUser(data), { size: "sm" })}
+            <span class="user-chip-name">${escapeHtml((sessionUser(data) && sessionUser(data).name) || "Account")}</span>
+          </button>
+          <button type="button" class="ghost signout-chip" onclick="logout()" title="Sign out">Sign out</button>
+        </div>
       </header>
       <main class="wrap">${viewHTML(data)}</main>
       <nav class="bottom-nav" aria-label="Primary">
@@ -1316,7 +1330,7 @@ function render() {
           <span class="bn-label">Messages</span>
         </button>
         <button type="button" class="${bottomAccount}" onclick="go('account')">
-          <span class="bn-icon" aria-hidden="true">☺</span>
+          <span class="bn-icon bn-avatar" aria-hidden="true">${avatarHTML(sessionUser(data), { size: "xs", className: "bn-avatar-inner" })}</span>
           <span class="bn-label">Account</span>
         </button>
       </nav>
@@ -1397,17 +1411,119 @@ function setAuthScreen(screen) {
   render();
 }
 
+function userInitials(u) {
+  const name = String((u && u.name) || "?").trim();
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function avatarHTML(u, opts) {
+  opts = opts || {};
+  const size = opts.size || "sm";
+  const extra = opts.className ? " " + opts.className : "";
+  const cls = `avatar avatar-${size}${extra}`;
+  const title = escapeAttr((u && u.name) || "User");
+  if (u && u.avatar) {
+    return `<span class="${cls}" title="${title}"><img src="${escapeAttr(u.avatar)}" alt="" /></span>`;
+  }
+  return `<span class="${cls} avatar-fallback" title="${title}" aria-hidden="true">${escapeHtml(userInitials(u))}</span>`;
+}
+
+function previewAvatarUrl(me) {
+  if (state.avatarDraft !== undefined) return state.avatarDraft || "";
+  return (me && me.avatar) || "";
+}
+
+function compressImageToDataUrl(file, maxEdge, quality) {
+  maxEdge = maxEdge || 320;
+  quality = quality == null ? 0.82 : quality;
+  return new Promise((resolve, reject) => {
+    if (!file || !String(file.type || "").startsWith("image/")) {
+      reject(new Error("Please choose an image file (JPEG, PNG, or WebP)."));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error("Image is too large (max 8MB before compress)."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read image."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not decode image."));
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        const scale = Math.min(1, maxEdge / Math.max(w, h || 1));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        let dataUrl = "";
+        try {
+          dataUrl = canvas.toDataURL("image/webp", quality);
+          if (!dataUrl || dataUrl.indexOf("image/webp") === -1) {
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+          }
+        } catch (e) {
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+        }
+        if (dataUrl.length > 240000) {
+          dataUrl = canvas.toDataURL("image/jpeg", 0.65);
+        }
+        if (dataUrl.length > 280000) {
+          reject(new Error("Compressed image still too large. Try a simpler photo."));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function onAvatarFileSelected(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  compressImageToDataUrl(file, 320, 0.8)
+    .then((url) => {
+      state.avatarDraft = url;
+      render();
+    })
+    .catch((err) => {
+      alert((err && err.message) || "Could not process image.");
+      if (input) input.value = "";
+    });
+}
+
+function clearAvatarDraft() {
+  state.avatarDraft = "";
+  render();
+}
+
 function profileBadgeHTML(u, opts) {
   if (!u) return `<span class="meta">Unknown</span>`;
-  const showBadge = opts && opts.compact;
+  opts = opts || {};
+  const showBadge = opts.compact;
   const name = escapeHtml(u.name || "User");
   const badge = u.contractor
     ? `<span class="role-badge contractor">Ranch / Farm</span>`
     : showBadge
       ? `<span class="role-badge homeowner">Hobby farm</span>`
-      : "";
-  if (opts && opts.nameOnly) return name;
-  return `<span class="poster-line"><span class="poster-name">${name}</span>${badge}</span>`;
+      : u.admin
+        ? `<span class="role-badge admin">Admin</span>`
+        : "";
+  if (opts.nameOnly) return name;
+  const size = opts.avatarSize || (opts.compact ? "xs" : "sm");
+  const hideAvatar = opts.hideAvatar;
+  const av = hideAvatar ? "" : avatarHTML(u, { size });
+  return `<span class="poster-line">${av}<span class="poster-name">${name}</span>${badge}</span>`;
 }
 
 function authHTML(data) {
@@ -1512,7 +1628,7 @@ function authDemoHTML() {
             return `
               <button type="button" class="demo-card" onclick="loginAsDemo('${d.id}')">
                 <div class="row">
-                  <b>${escapeHtml(u.name)}</b>
+                  <span class="poster-line">${avatarHTML(u, { size: "sm" })}<b>${escapeHtml(u.name)}</b></span>
                   ${u.contractor ? `<span class="role-badge contractor">Ranch / Farm</span>` : u.admin ? `<span class="role-badge admin">Admin</span>` : `<span class="role-badge homeowner">Hobby farm</span>`}
                 </div>
                 <div class="meta">${escapeHtml(u.email)} · ${escapeHtml(u.city)}, TX</div>
@@ -1539,6 +1655,7 @@ function enterSession(data, userId) {
   state.listingId = null;
   state.threadId = null;
   state.editingProfile = false;
+  state.avatarDraft = undefined;
   state.authScreen = "welcome";
   const u = data.users[userId];
   state.searchZip = (u && u.zip) || null;
@@ -1592,6 +1709,7 @@ function submitCreateProfile(e) {
     zip,
     bio,
     company: contractor ? company : "",
+    avatar: "",
     profileComplete: true,
     admin: false,
     blocked: []
@@ -1631,13 +1749,16 @@ function loginAsDemo(userId) {
 
 function logout() {
   const data = db.get();
+  // Session only — keep listings, users (incl. avatars), messages, offers.
   data.currentUser = null;
   db.save(data);
   state.authScreen = "welcome";
   state.editingProfile = false;
+  state.avatarDraft = undefined;
   state.view = "browse";
   state.listingId = null;
   state.threadId = null;
+  state.reportTarget = null;
   render();
   window.scrollTo(0, 0);
 }
@@ -1682,6 +1803,9 @@ function submitEditProfile(e) {
   me.role = me.admin ? "Admin" : me.contractor ? "Ranch / Farm" : "Hobby farm";
   me.company = me.contractor ? company : "";
   me.profileComplete = true;
+  if (state.avatarDraft !== undefined) {
+    me.avatar = state.avatarDraft || "";
+  }
   if (newPw) {
     if (newPw.length < 3) {
       alert("New password needs at least 3 characters (or leave blank).");
@@ -1691,6 +1815,7 @@ function submitEditProfile(e) {
   }
   db.save(data);
   state.editingProfile = false;
+  state.avatarDraft = undefined;
   render();
 }
 
@@ -2083,7 +2208,7 @@ function offerCardHTML(data, offer, opts) {
           <b>${escapeHtml(offer.type)}</b>
           <span class="status-chip ${escapeAttr(offer.status)}">${escapeHtml(offer.status)}</span>
         </div>
-        <div class="meta">${from ? escapeHtml(from.name) : ""} · ${new Date(offer.at).toLocaleString()}</div>
+        <div class="meta poster-line">${from ? avatarHTML(from, { size: "xs" }) + `<span>${escapeHtml(from.name)}</span>` : ""} · ${new Date(offer.at).toLocaleString()}</div>
       </div>
       ${
         offered
@@ -2441,7 +2566,7 @@ function messagesHTML(data) {
           return `
             <button class="thread-item ${unread ? "has-unread" : ""} ${blocked ? "blocked-thread" : ""}" onclick="goThread('${t.id}')">
               <div class="row">
-                <b>${escapeHtml((other && other.name) || "User")}${blocked ? ' <span class="status-chip Rejected">Blocked</span>' : ""}</b>
+                <b class="poster-line">${avatarHTML(other, { size: "sm" })}<span>${escapeHtml((other && other.name) || "User")}</span>${blocked ? ' <span class="status-chip Rejected">Blocked</span>' : ""}</b>
                 <span class="meta">${last ? new Date(last.at).toLocaleString() : ""}</span>
               </div>
               <div class="meta">${escapeHtml((listing && listing.title) || "Listing")}${
@@ -2490,7 +2615,9 @@ function threadHTML(data) {
       <button class="ghost" onclick="go('messages')">← Messages</button>
       <div class="panel thread-header">
         <div class="row">
-          <div>
+          <div class="poster-line" style="align-items:flex-start;gap:12px">
+            ${avatarHTML(other, { size: "md" })}
+            <div>
             <h2 style="margin:0">${escapeHtml((other && other.name) || "User")}</h2>
             <div class="meta">
               About:
@@ -2499,6 +2626,7 @@ function threadHTML(data) {
                   ? `<a href="#" onclick="event.preventDefault(); go('detail','${listing.id}')">${escapeHtml(listing.title)}</a>`
                   : "listing"
               }
+            </div>
             </div>
           </div>
         </div>
@@ -2521,7 +2649,7 @@ function threadHTML(data) {
               const u = userBy(m.from);
               return `
                 <div class="msg-bubble ${mine ? "mine" : "theirs"}">
-                  <div class="msg-meta">${escapeHtml(u ? u.name : "")} · ${new Date(m.at).toLocaleString()}</div>
+                  <div class="msg-meta poster-line">${avatarHTML(u, { size: "xs" })}<span>${escapeHtml(u ? u.name : "")} · ${new Date(m.at).toLocaleString()}</span></div>
                   <div class="msg-body">${escapeHtml(m.body)}</div>
                 </div>`;
             })
@@ -2987,12 +3115,29 @@ function accountHTML(data) {
       : "";
 
   if (state.editingProfile) {
+    const draftUrl = previewAvatarUrl(me);
+    const draftUser = Object.assign({}, me, { avatar: draftUrl });
     return `
       <div class="panel" style="max-width:640px">
-        <button class="ghost" onclick="state.editingProfile=false; render()">← Back</button>
+        <button class="ghost" onclick="state.editingProfile=false; state.avatarDraft=undefined; render()">← Back</button>
         <h2>Edit profile</h2>
         <div class="warn">Demo only: password changes stay in this browser.</div>
         <form onsubmit="submitEditProfile(event)">
+          <div class="field avatar-edit-field">
+            <label>Profile picture</label>
+            <div class="avatar-edit-row">
+              ${avatarHTML(draftUser, { size: "lg" })}
+              <div class="avatar-edit-controls">
+                <input type="file" id="avatarFile" accept="image/*" onchange="onAvatarFileSelected(this)" />
+                <p class="help">Upload a photo — resized to ~320px and compressed for localStorage.</p>
+                ${
+                  draftUrl
+                    ? `<button type="button" class="ghost" onclick="clearAvatarDraft()">Remove photo</button>`
+                    : `<p class="help">No photo yet — initials will show.</p>`
+                }
+              </div>
+            </div>
+          </div>
           <div class="field"><label>Name *</label>
             <input name="name" required maxlength="60" value="${escapeAttr(me.name)}" />
           </div>
@@ -3034,8 +3179,13 @@ function accountHTML(data) {
   return `
     <div class="panel" style="max-width:640px">
       <h2>Account</h2>
-      <div class="ok" style="margin-bottom:12px">${profileBadgeHTML(me)}</div>
-      <p class="meta">${escapeHtml(me.email || "—")} · ${escapeHtml(me.city || "—")}, TX ${escapeHtml(me.zip || "")}</p>
+      <div class="account-hero">
+        ${avatarHTML(me, { size: "lg" })}
+        <div>
+          <div class="ok" style="margin-bottom:6px">${profileBadgeHTML(me, { hideAvatar: true })}</div>
+          <p class="meta" style="margin:0">${escapeHtml(me.email || "—")} · ${escapeHtml(me.city || "—")}, TX ${escapeHtml(me.zip || "")}</p>
+        </div>
+      </div>
       ${me.company ? `<p class="meta">Company: ${escapeHtml(me.company)}</p>` : ""}
       ${me.bio ? `<p>${escapeHtml(me.bio)}</p>` : ""}
       <p>Active listings: ${count} / 3 free</p>
@@ -3044,11 +3194,15 @@ function accountHTML(data) {
       ${blockedNote}
       <div class="actions">
         <button class="ghost" onclick="go('mine')">My listings</button>
-        <button class="ghost" onclick="state.editingProfile=true; render()">Edit profile</button>
+        <button class="ghost" onclick="state.editingProfile=true; state.avatarDraft=undefined; render()">Edit profile</button>
         <button class="primary" onclick="toggleSub()">${
           me.subscribed ? "Cancel extra-listing plan" : "Upgrade $3.99/month"
         }</button>
-        <button class="danger" onclick="logout()">Log out</button>
+      </div>
+      <div class="panel account-signout">
+        <h3 style="margin-top:0;font-size:16px">Sign out</h3>
+        <p class="help" style="margin-top:0">Ends this session only. Your listings, messages, and profile photo stay in this browser — sign in again with the same email to restore them.</p>
+        <button class="danger" onclick="logout()">Sign out</button>
       </div>
       <div class="panel" style="margin-top:16px;background:#f3eee4;box-shadow:none">
         <h3 style="margin-top:0;font-size:16px">Blocked users</h3>
@@ -3059,7 +3213,7 @@ function accountHTML(data) {
                   .map((id) => {
                     const u = userBy(id);
                     return `<li class="row">
-                      <span>${escapeHtml((u && u.name) || id)}</span>
+                      <span class="poster-line">${avatarHTML(u, { size: "xs" })}<span>${escapeHtml((u && u.name) || id)}</span></span>
                       <button class="ghost" onclick="unblockUser('${id}')">Unblock</button>
                     </li>`;
                   })
@@ -3124,6 +3278,7 @@ function resetDemo() {
     pickOfferedId: null,
     authScreen: "welcome",
     editingProfile: false,
+    avatarDraft: undefined,
     reportTarget: null,
     filtersOpen: false
   };
