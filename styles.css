@@ -572,3 +572,71 @@ code {
   .user-chip-name { display: none; }
   .user-chip { padding: 3px; }
 }
+
+/* ---------- Notifications ---------- */
+.notif-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin: 10px 16px 0;
+  padding: 12px 14px;
+  background: #e8f0d8;
+  border: 1px solid #a8c090;
+  border-radius: 14px;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+}
+.notif-banner-text { flex: 1; min-width: 180px; line-height: 1.35; }
+.notif-banner-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.notif-panel .notif-status {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.notif-status-granted { background: #c9dbc8; color: #1e4a32; }
+.notif-status-default { background: #ebe4d6; color: #5a5040; }
+.notif-status-denied { background: #f0d4d4; color: #7a2e2e; }
+.notif-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  font-family: sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notif-toggle-row input { margin-top: 2px; flex-shrink: 0; }
+.watch-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.watch-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: sans-serif;
+  font-size: 13px;
+}
+.watch-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.watch-form input {
+  flex: 1;
+  min-width: 140px;
+}
+@media (max-width: 799px) {
+  .notif-banner { margin: 8px 10px 0; }
+}

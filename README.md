@@ -26,7 +26,9 @@ Then visit http://localhost:8080
 |------|------|
 | `index.html` | App shell |
 | `styles.css` | Farm aesthetic (green accent `#2f6b4f`, Georgia headings) |
-| `app.js` | Full SPA: browse, detail, post, my listings, messages, admin, account |
+| `app.js` | Full SPA: browse, detail, post, my listings, messages, admin, account, notifications |
+| `sw.js` | Lightweight service worker so Notification API works on HTTPS (agsswap.com) |
+| `CNAME` | Custom domain `agsswap.com` |
 
 ## Product rules (enforced)
 
@@ -69,6 +71,7 @@ Roles: **Hobby farm** (like RenoSwap Homeowner) and **Ranch / Farm** badge (like
 Same shape as RenoSwap’s demo, but key **`agsswap_db`** (RenoSwap uses `renoswap_v1`) so both apps can share a browser without collisions:
 
 - `listings`, `currentUser`, `users`, `offers[]`, `threads[]`, `messages[]`, `reports[]`
+- Per user (notifications): `notificationsEnabled`, `watchKeywords[]`, `notifiedListingIds[]`, `notifiedOfferIds[]`, `lastNotifiedMessageAt`, `notifPromptDismissed`
 
 Seed emails: `you@agsswap.demo`, `elena@agsswap.demo`, `ranch@agsswap.demo`, `admin@agsswap.demo`.
 
@@ -102,6 +105,32 @@ Personal cars/SUVs (tractors, implements, farm trailers OK), land, housing renta
 ## Near-me browse & swap matching
 
 Search ZIP + radius (25/50/100 / Anywhere in Texas), Haversine miles, swap match scoring on `looking_for`.
+
+## Notifications (browser)
+
+Uses the **Notification API** + optional `sw.js` (registered at `/sw.js` for the custom domain root). No backend — alerts fire in this browser from localStorage events.
+
+**Account → Notifications**
+- Status: Denied / Default / Granted (or Unavailable)
+- **Allow notifications** → `Notification.requestPermission()`
+- Toggle: enable/disable alerts while permission is granted (stored on the user in `agsswap_db`)
+- **Watch list**: add/remove keywords (e.g. `box blade`, `T-posts`, `goats`). Your Swap listings’ `looking_for` is matched automatically via the same swap-match scoring as Browse.
+
+**When you get pinged**
+1. An **Approved** listing matches your watches / looking-for (not your own posts)
+2. A **new message**, **swap/buy offer**, or **Fast & Free claim** on your listing
+
+Deduped with `notifiedListingIds`, `notifiedOfferIds`, and `lastNotifiedMessageAt` per user. Enabling alerts baselines current seeds so you are not spammed on first grant. Soft banner after login if permission is still Default.
+
+### How to demo notifications
+
+1. Open **https://agsswap.com** (HTTPS required; `file://` will not grant permission).
+2. Continue as **You** → Account → **Allow notifications** → ensure alerts are on → add watch **`box blade`**.
+3. **Quick match demo:** after adding the watch, the seed **Used 6' box blade** listing should trigger “Match on AgsSwap” (new watches re-check Approved listings). Click the notification to open it.
+4. **Approve path:** as another user, Post a listing whose title/description includes your watch phrase → switch to **Admin** → Approve → watchers get a match ping (not the poster).
+5. **Message / offer:** as **Elena**, message You or propose a swap on You’s goats — with You’s alerts on, an inbound notification fires.
+
+If permission is Denied, use the browser’s site settings for agsswap.com → allow notifications → reload.
 
 ## Try the swap-offer flow
 

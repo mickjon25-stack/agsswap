@@ -236,7 +236,13 @@ function blankUserExtras() {
     profileComplete: false,
     subscribed: false,
     admin: false,
-    blocked: []
+    blocked: [],
+    notificationsEnabled: false,
+    watchKeywords: [],
+    notifiedListingIds: [],
+    notifiedOfferIds: [],
+    lastNotifiedMessageAt: 0,
+    notifPromptDismissed: false
   };
 }
 
@@ -471,6 +477,14 @@ function normalizeUser(u, id) {
   if (seed && !out.city) out.city = seed.city;
   if (seed && !out.zip) out.zip = seed.zip;
   if (out.avatar == null || typeof out.avatar !== "string") out.avatar = "";
+  if (out.notificationsEnabled == null) out.notificationsEnabled = false;
+  if (!Array.isArray(out.watchKeywords)) out.watchKeywords = [];
+  if (!Array.isArray(out.notifiedListingIds)) out.notifiedListingIds = [];
+  if (!Array.isArray(out.notifiedOfferIds)) out.notifiedOfferIds = [];
+  if (out.lastNotifiedMessageAt == null || typeof out.lastNotifiedMessageAt !== "number") {
+    out.lastNotifiedMessageAt = 0;
+  }
+  if (out.notifPromptDismissed == null) out.notifPromptDismissed = false;
   return out;
 }
 
@@ -564,7 +578,8 @@ let state = {
   avatarDraft: undefined, // undefined = use saved; "" = cleared; data URL = new
   profileNotice: null, // brief ok message after saving profile
   reportTarget: null, // { kind, listingId?, userId? } | null
-  filtersOpen: false // mobile browse filters disclosure
+  filtersOpen: false, // mobile browse filters disclosure
+  notifSoftPromptHidden: false // session-only hide for "Not now"
 };
 
 let countdownTimer = null;
@@ -1015,6 +1030,579 @@ function browseMatchesForYou(data, pool) {
     .map((x) => x.l);
 }
 
+/* ---------- Browser notifications (demo, localStorage + Notification API) ---------- */
+
+function notificationsSupported() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function notificationPermission() {
+  if (!notificationsSupported()) return "unsupported";
+  return Notification.permission || "default";
+}
+
+function ensureNotifFields(user) {
+  if (!user) return user;
+  if (user.notificationsEnabled == null) user.notificationsEnabled = false;
+  if (!Array.isArray(user.watchKeywords)) user.watchKeywords = [];
+  if (!Array.isArray(user.notifiedListingIds)) user.notifiedListingIds = [];
+  if (!Array.isArray(user.notifiedOfferIds)) user.notifiedOfferIds = [];
+  if (typeof user.lastNotifiedMessageAt !== "number") user.lastNotifiedMessageAt = 0;
+  if (user.notifPromptDismissed == null) user.notifPromptDismissed = false;
+  return user;
+}
+
+let swRegistrationPromise = null;
+
+function registerAgsSwapServiceWorker() {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return Promise.resolve(null);
+  }
+  if (swRegistrationPromise) return swRegistrationPromise;
+  // Custom domain (agsswap.com) serves from site root — register /sw.js
+  swRegistrationPromise = navigator.serviceWorker
+    .register("/sw.js")
+    .then((reg) => reg)
+    .catch(() => null);
+  return swRegistrationPromise;
+}
+
+function userWantsAlerts(user) {
+  ensureNotifFields(user);
+  return !!(user && user.notificationsEnabled && notificationPermission() === "granted");
+}
+
+async function showAppNotification(title, body, payload) {
+  if (!notificationsSupported()) return false;
+  if (Notification.permission !== "granted") return false;
+  const data = Object.assign({}, payload || {});
+  const opts = {
+    body: String(body || "").slice(0, 180),
+    tag: data.tag || undefined,
+    renotify: !!data.renotify,
+    data: data
+  };
+  try {
+    const reg = await registerAgsSwapServiceWorker();
+    if (reg && reg.showNotification) {
+      await reg.showNotification(String(title || "AgsSwap"), opts);
+      return true;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  try {
+    const n = new Notification(String(title || "AgsSwap"), opts);
+    n.onclick = () => {
+      try {
+        window.focus();
+      } catch (_) {}
+      handleNotificationClick(data);
+      n.close();
+    };
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function handleNotificationClick(data) {
+  if (!data) return;
+  if (data.listingId) {
+    go("detail", data.listingId);
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (data.threadId) {
+    goThread(data.threadId);
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (data.view) {
+    go(data.view);
+  }
+}
+
+function watchPhrasesForUser(user, data) {
+  ensureNotifFields(user);
+  const phrases = (user.watchKeywords || [])
+    .map((w) => String(w || "").trim())
+    .filter((w) => w.length >= 2);
+  const looking = (data.listings || [])
+    .filter(
+      (l) =>
+        l.poster === user.id &&
+        (l.status === "Approved" || l.status === "Pending Review" || l.status === "Claimed") &&
+        String(l.looking_for || "").trim()
+    )
+    .map((l) => String(l.looking_for).trim());
+  return { phrases, looking };
+}
+
+/** True if listing matches watches and/or looking_for tokens (reuse swap scoring). */
+function listingMatchesInterest(listing, user, data) {
+  if (!listing || !user) return false;
+  if (listing.poster === user.id) return false;
+  if (listing.status !== "Approved") return false;
+  const { phrases, looking } = watchPhrasesForUser(user, data);
+  if (!phrases.length && !looking.length) return false;
+
+  const hay = [
+    listing.title,
+    listing.category,
+    listing.description,
+    listing.looking_for
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  for (const phrase of phrases) {
+    if (hay.includes(phrase.toLowerCase())) return true;
+  }
+
+  const fakeTarget = {
+    looking_for: phrases.concat(looking).join(" "),
+    category: "",
+    title: ""
+  };
+  return scoreSwapMatch(listing, fakeTarget) >= 3;
+}
+
+function markListingNotified(user, listingId) {
+  ensureNotifFields(user);
+  if (!user.notifiedListingIds.includes(listingId)) {
+    user.notifiedListingIds.push(listingId);
+    // Cap growth in long-lived demos
+    if (user.notifiedListingIds.length > 200) {
+      user.notifiedListingIds = user.notifiedListingIds.slice(-150);
+    }
+  }
+}
+
+function markOfferNotified(user, offerId) {
+  ensureNotifFields(user);
+  if (!user.notifiedOfferIds.includes(offerId)) {
+    user.notifiedOfferIds.push(offerId);
+    if (user.notifiedOfferIds.length > 200) {
+      user.notifiedOfferIds = user.notifiedOfferIds.slice(-150);
+    }
+  }
+}
+
+/** Mark current listings/offers/messages as already seen so enabling alerts does not spam seeds. */
+function baselineNotificationsAsSeen(data, user) {
+  ensureNotifFields(user);
+  for (const l of data.listings || []) {
+    if (l.status === "Approved" || l.status === "Claimed") {
+      markListingNotified(user, l.id);
+    }
+  }
+  for (const o of data.offers || []) {
+    markOfferNotified(user, o.id);
+  }
+  let maxAt = user.lastNotifiedMessageAt || 0;
+  for (const m of data.messages || []) {
+    if (m.at > maxAt) maxAt = m.at;
+  }
+  user.lastNotifiedMessageAt = maxAt;
+}
+
+async function notifyUsersOfListingMatch(data, listing, opts) {
+  if (!listing || listing.status !== "Approved") return;
+  const skipCurrent = opts && opts.skipCurrent;
+  const users = data.users || {};
+  for (const id of Object.keys(users)) {
+    const u = users[id];
+    if (!u || u.id === listing.poster) continue;
+    if (skipCurrent && id === data.currentUser) continue;
+    ensureNotifFields(u);
+    if (u.notifiedListingIds.includes(listing.id)) continue;
+    if (!userWantsAlerts(u)) continue;
+    if (!listingMatchesInterest(listing, u, data)) continue;
+    markListingNotified(u, listing.id);
+    await showAppNotification(
+      "Match on AgsSwap",
+      listing.title || "A listing matches what you want",
+      {
+        listingId: listing.id,
+        tag: "listing-" + listing.id,
+        url: "/?listing=" + encodeURIComponent(listing.id)
+      }
+    );
+  }
+}
+
+async function notifyListingOwnerOfOffer(data, offer, listing) {
+  if (!offer || !listing) return;
+  const owner = data.users[listing.poster];
+  if (!owner || owner.id === offer.from) return;
+  ensureNotifFields(owner);
+  if (owner.notifiedOfferIds.includes(offer.id)) return;
+  if (!userWantsAlerts(owner)) return;
+  markOfferNotified(owner, offer.id);
+  const kind =
+    offer.type === "Claim Free"
+      ? "Someone claimed your Fast & Free listing"
+      : offer.type === "Buy"
+        ? "Someone wants to buy your listing"
+        : "New swap offer on your listing";
+  await showAppNotification(kind, listing.title || "Your listing", {
+    listingId: listing.id,
+    threadHint: true,
+    tag: "offer-" + offer.id,
+    url: "/?listing=" + encodeURIComponent(listing.id)
+  });
+}
+
+async function notifyInboundMessage(data, msg, thread) {
+  if (!msg || !thread) return;
+  const recipients = (thread.participants || []).filter((p) => p !== msg.from);
+  for (const rid of recipients) {
+    const u = data.users[rid];
+    if (!u) continue;
+    ensureNotifFields(u);
+    if (msg.at <= (u.lastNotifiedMessageAt || 0)) continue;
+    if (!userWantsAlerts(u)) continue;
+    u.lastNotifiedMessageAt = Math.max(u.lastNotifiedMessageAt || 0, msg.at);
+    const listing = listingById(data, thread.listingId);
+    const title = "New message on AgsSwap";
+    const body = listing
+      ? (listing.title || "Listing") + ": " + String(msg.body || "").slice(0, 80)
+      : String(msg.body || "").slice(0, 100);
+    await showAppNotification(title, body, {
+      threadId: thread.id,
+      listingId: thread.listingId || null,
+      tag: "msg-" + thread.id,
+      renotify: true,
+      url: "/?thread=" + encodeURIComponent(thread.id)
+    });
+  }
+}
+
+/** On load / login: catch up on matches, unread messages, and offers since last check. */
+async function runNotificationCatchUp(data) {
+  const me = sessionUser(data);
+  if (!me || !userWantsAlerts(me)) return;
+  ensureNotifFields(me);
+
+  // New approved listings matching watches / looking_for
+  for (const l of data.listings || []) {
+    if (l.status !== "Approved") continue;
+    if (l.poster === me.id) continue;
+    if (me.notifiedListingIds.includes(l.id)) continue;
+    if (!listingMatchesInterest(l, me, data)) continue;
+    markListingNotified(me, l.id);
+    await showAppNotification(
+      "Match on AgsSwap",
+      l.title || "A listing matches what you want",
+      {
+        listingId: l.id,
+        tag: "listing-" + l.id,
+        url: "/?listing=" + encodeURIComponent(l.id)
+      }
+    );
+  }
+
+  // Inbound offers on my listings
+  for (const o of data.offers || []) {
+    const listing = listingById(data, o.listingId);
+    if (!listing || listing.poster !== me.id) continue;
+    if (o.from === me.id) continue;
+    if (me.notifiedOfferIds.includes(o.id)) continue;
+    markOfferNotified(me, o.id);
+    if (!userWantsAlerts(me)) continue;
+    const kind =
+      o.type === "Claim Free"
+        ? "Someone claimed your Fast & Free listing"
+        : o.type === "Buy"
+          ? "Someone wants to buy your listing"
+          : "New swap offer on your listing";
+    await showAppNotification(kind, listing.title || "Your listing", {
+      listingId: listing.id,
+      tag: "offer-" + o.id,
+      url: "/?listing=" + encodeURIComponent(listing.id)
+    });
+  }
+
+  // Unread / newer messages than lastNotifiedMessageAt
+  const myThreads = (data.threads || []).filter(
+    (t) => Array.isArray(t.participants) && t.participants.includes(me.id)
+  );
+  let newest = me.lastNotifiedMessageAt || 0;
+  for (const t of myThreads) {
+    const msgs = (data.messages || [])
+      .filter((m) => m.threadId === t.id && m.from !== me.id && m.at > (me.lastNotifiedMessageAt || 0))
+      .sort((a, b) => a.at - b.at);
+    if (!msgs.length) continue;
+    const latest = msgs[msgs.length - 1];
+    newest = Math.max(newest, latest.at);
+    const listing = listingById(data, t.listingId);
+    const body = listing
+      ? (listing.title || "Listing") + ": " + String(latest.body || "").slice(0, 80)
+      : String(latest.body || "").slice(0, 100);
+    await showAppNotification("New message on AgsSwap", body, {
+      threadId: t.id,
+      listingId: t.listingId || null,
+      tag: "msg-" + t.id,
+      renotify: true,
+      url: "/?thread=" + encodeURIComponent(t.id)
+    });
+  }
+  if (newest > (me.lastNotifiedMessageAt || 0)) {
+    me.lastNotifiedMessageAt = newest;
+  }
+}
+
+let notifCatchUpScheduled = false;
+function scheduleNotificationCatchUp() {
+  if (notifCatchUpScheduled) return;
+  notifCatchUpScheduled = true;
+  Promise.resolve().then(async () => {
+    notifCatchUpScheduled = false;
+    try {
+      const data = db.get();
+      await runNotificationCatchUp(data);
+      db.save(data);
+    } catch (_) {
+      /* ignore */
+    }
+  });
+}
+
+async function requestNotificationPermission() {
+  if (!notificationsSupported()) {
+    alert(
+      "Browser notifications are not available in this browser (or context). Try Chrome/Firefox/Safari on https://agsswap.com — file:// and some private modes block them."
+    );
+    return "unsupported";
+  }
+  await registerAgsSwapServiceWorker();
+  let perm = Notification.permission;
+  if (perm === "default") {
+    try {
+      perm = await Notification.requestPermission();
+    } catch (_) {
+      perm = Notification.permission;
+    }
+  }
+  const data = db.get();
+  const me = sessionUser(data);
+  if (me) {
+    ensureNotifFields(me);
+    if (perm === "granted") {
+      const firstEnable = !me.notificationsEnabled;
+      me.notificationsEnabled = true;
+      me.notifPromptDismissed = true;
+      if (firstEnable) baselineNotificationsAsSeen(data, me);
+    }
+    db.save(data);
+  }
+  render();
+  return perm;
+}
+
+function toggleNotificationsEnabled(on) {
+  const data = db.get();
+  const me = sessionUser(data);
+  if (!me) return;
+  ensureNotifFields(me);
+  if (on && notificationPermission() !== "granted") {
+    requestNotificationPermission();
+    return;
+  }
+  if (on && !me.notificationsEnabled) {
+    baselineNotificationsAsSeen(data, me);
+  }
+  me.notificationsEnabled = !!on;
+  db.save(data);
+  render();
+}
+
+function addWatchKeyword(raw) {
+  const data = db.get();
+  const me = sessionUser(data);
+  if (!me) return;
+  ensureNotifFields(me);
+  const phrase = String(raw || "").trim().replace(/\s+/g, " ");
+  if (phrase.length < 2) {
+    alert("Enter a keyword or phrase (at least 2 characters).");
+    return;
+  }
+  if (phrase.length > 60) {
+    alert("Keep watch phrases under 60 characters.");
+    return;
+  }
+  const lower = phrase.toLowerCase();
+  if (me.watchKeywords.some((w) => String(w).toLowerCase() === lower)) {
+    alert("That watch is already on your list.");
+    return;
+  }
+  me.watchKeywords.push(phrase);
+  // Allow catch-up to ping for already-approved matches of this new watch (demo-friendly).
+  if (userWantsAlerts(me)) {
+    for (const l of data.listings || []) {
+      if (l.status !== "Approved" || l.poster === me.id) continue;
+      if (!listingMatchesInterest(l, me, data)) continue;
+      me.notifiedListingIds = me.notifiedListingIds.filter((id) => id !== l.id);
+    }
+  }
+  db.save(data);
+  render();
+  if (userWantsAlerts(me)) scheduleNotificationCatchUp();
+}
+
+function removeWatchKeyword(idx) {
+  const data = db.get();
+  const me = sessionUser(data);
+  if (!me) return;
+  ensureNotifFields(me);
+  const i = Number(idx);
+  if (!Number.isFinite(i) || i < 0 || i >= me.watchKeywords.length) return;
+  me.watchKeywords.splice(i, 1);
+  db.save(data);
+  render();
+}
+
+function submitWatchKeyword(e) {
+  e.preventDefault();
+  const input = e.target.querySelector('input[name="watch"]');
+  const val = input ? input.value : "";
+  addWatchKeyword(val);
+}
+
+function dismissNotifPrompt(permanent) {
+  state.notifSoftPromptHidden = true;
+  if (permanent) {
+    const data = db.get();
+    const me = sessionUser(data);
+    if (me) {
+      ensureNotifFields(me);
+      me.notifPromptDismissed = true;
+      db.save(data);
+    }
+  }
+  render();
+}
+
+function notifSoftPromptHTML(data) {
+  const me = sessionUser(data);
+  if (!me || state.notifSoftPromptHidden) return "";
+  ensureNotifFields(me);
+  if (me.notifPromptDismissed) return "";
+  if (!notificationsSupported()) return "";
+  if (notificationPermission() !== "default") return "";
+  return `
+    <div class="notif-banner" role="status">
+      <div class="notif-banner-text">
+        <strong>Get notified</strong> when a match or offer comes in — watch keywords + your listings’ looking-for.
+      </div>
+      <div class="notif-banner-actions">
+        <button type="button" class="primary" onclick="requestNotificationPermission()">Allow</button>
+        <button type="button" class="ghost" onclick="dismissNotifPrompt(true)">Not now</button>
+      </div>
+    </div>`;
+}
+
+function notificationsPanelHTML(me) {
+  ensureNotifFields(me);
+  const perm = notificationPermission();
+  let statusLabel = "Default";
+  let statusClass = "notif-status-default";
+  if (perm === "unsupported") {
+    statusLabel = "Unavailable";
+    statusClass = "notif-status-denied";
+  } else if (perm === "denied") {
+    statusLabel = "Denied";
+    statusClass = "notif-status-denied";
+  } else if (perm === "granted") {
+    statusLabel = "Granted";
+    statusClass = "notif-status-granted";
+  }
+
+  const unsupportedHelp =
+    perm === "unsupported"
+      ? `<p class="help">This browser (or context) does not support the Notification API. Use a modern browser on <b>https://agsswap.com</b> — not file://.</p>`
+      : "";
+  const deniedHelp =
+    perm === "denied"
+      ? `<p class="help">Permission was denied. In your browser site settings for agsswap.com, allow notifications, then reload.</p>`
+      : "";
+
+  const allowBtn =
+    perm === "granted"
+      ? `<span class="ok" style="display:inline-block;margin:0">Permission granted</span>`
+      : perm === "unsupported"
+        ? ""
+        : `<button type="button" class="primary" onclick="requestNotificationPermission()">Allow notifications</button>`;
+
+  const toggleDisabled = perm !== "granted" ? "disabled" : "";
+  const toggleChecked = me.notificationsEnabled && perm === "granted" ? "checked" : "";
+
+  const watches =
+    me.watchKeywords.length === 0
+      ? `<p class="help">No watch keywords yet. Add phrases like “box blade”, “T-posts”, or “goats”.</p>`
+      : `<ul class="watch-list">${me.watchKeywords
+          .map(
+            (w, i) => `<li class="row">
+            <span>${escapeHtml(w)}</span>
+            <button type="button" class="ghost" onclick="removeWatchKeyword(${i})">Remove</button>
+          </li>`
+          )
+          .join("")}</ul>`;
+
+  return `
+    <div class="panel notif-panel" style="margin-top:16px;background:#f3eee4;box-shadow:none">
+      <h3 style="margin-top:0;font-size:16px">Notifications</h3>
+      <p class="meta" style="margin-top:0">Status: <span class="notif-status ${statusClass}">${statusLabel}</span></p>
+      ${unsupportedHelp}
+      ${deniedHelp}
+      <div class="actions" style="margin-top:8px">${allowBtn}</div>
+      <label class="notif-toggle-row">
+        <input type="checkbox" ${toggleChecked} ${toggleDisabled}
+          onchange="toggleNotificationsEnabled(this.checked)" />
+        <span>Enable alerts while permission is granted</span>
+      </label>
+      <p class="help">Alerts for: (1) Approved listings matching your watch list or your listings’ <b>looking for</b> text; (2) new messages and swap / buy / claim interest on your items. You are never notified about your own posts.</p>
+      <h4 style="margin:14px 0 6px;font-size:14px;font-family:Georgia,serif">Watch list</h4>
+      <p class="help" style="margin-top:0">Swap listings’ looking-for is used automatically. Watches are extra keywords/phrases.</p>
+      ${watches}
+      <form class="watch-form" onsubmit="submitWatchKeyword(event)">
+        <input name="watch" maxlength="60" placeholder="e.g. box blade" aria-label="Watch keyword" />
+        <button type="submit" class="ghost">Add</button>
+      </form>
+    </div>`;
+}
+
+function wireNotificationListeners() {
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || data.type !== "NOTIFICATION_CLICK") return;
+      handleNotificationClick(data);
+    });
+  }
+  // Deep-link from notification openWindow / first paint
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const listing = params.get("listing");
+    const thread = params.get("thread");
+    if (listing) {
+      state.view = "detail";
+      state.listingId = listing;
+    } else if (thread) {
+      state.view = "thread";
+      state.threadId = thread;
+    }
+    if (listing || thread) {
+      const url = window.location.pathname || "/";
+      window.history.replaceState({}, "", url);
+    }
+  } catch (_) {}
+}
+
+wireNotificationListeners();
+registerAgsSwapServiceWorker();
+
 const REPORT_REASONS = [
   "Wrong category",
   "Not farm / ranch items",
@@ -1316,6 +1904,7 @@ function render() {
           <button type="button" class="ghost signout-chip" onclick="logout()" title="Sign out">Sign out</button>
         </div>
       </header>
+      ${notifSoftPromptHTML(data)}
       <main class="wrap">${viewHTML(data)}</main>
       <nav class="bottom-nav" aria-label="Primary">
         <button type="button" class="${bottomBrowse}" onclick="go('browse')">
@@ -1348,6 +1937,7 @@ function render() {
     const scroller = document.getElementById("msgList");
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }
+  scheduleNotificationCatchUp();
 }
 
 function startCountdownIfNeeded(data) {
@@ -2462,9 +3052,11 @@ function submitSwapOffer(e) {
   const body =
     message ||
     `I'd like to swap my "${offered.title}" for your "${target.title}".`;
-  addMessage(data, thread.id, body, data.currentUser);
+  const msg = addMessage(data, thread.id, body, data.currentUser);
   markThreadRead(data, thread.id, data.currentUser);
   db.save(data);
+  notifyListingOwnerOfOffer(data, offer, target).then(() => db.save(data));
+  notifyInboundMessage(data, msg, thread).then(() => db.save(data));
   state.pickOfferedId = null;
   goThread(thread.id);
 }
@@ -2496,9 +3088,11 @@ function makeBuyOffer(listingId) {
   const body =
     offer.message ||
     `I'd like to buy "${l.title}"${l.price ? " for $" + l.price : ""}.`;
-  addMessage(data, thread.id, body, data.currentUser);
+  const msg = addMessage(data, thread.id, body, data.currentUser);
   markThreadRead(data, thread.id, data.currentUser);
   db.save(data);
+  notifyListingOwnerOfOffer(data, offer, l).then(() => db.save(data));
+  notifyInboundMessage(data, msg, thread).then(() => db.save(data));
   goThread(thread.id);
 }
 
@@ -2711,9 +3305,10 @@ function sendMessage(e) {
   const fd = new FormData(e.target);
   const body = String(fd.get("body") || "").trim();
   if (!body) return;
-  addMessage(data, thread.id, body, data.currentUser);
+  const msg = addMessage(data, thread.id, body, data.currentUser);
   markThreadRead(data, thread.id, data.currentUser);
   db.save(data);
+  notifyInboundMessage(data, msg, thread).then(() => db.save(data));
   render();
 }
 
@@ -3065,6 +3660,10 @@ function approve(id) {
     l.expires_at = Date.now() + 45 * 86400 * 1000;
   }
   db.save(data);
+  notifyUsersOfListingMatch(data, l).then(() => {
+    db.save(data);
+    render();
+  });
   render();
 }
 
@@ -3104,13 +3703,16 @@ function claimFree(id) {
     at: Date.now()
   });
   const thread = findOrCreateThread(data, id, l.poster, null);
-  addMessage(
+  const claimOffer = data.offers[data.offers.length - 1];
+  const msg = addMessage(
     data,
     thread.id,
     `I claimed "${l.title}" for pickup. Let's coordinate a time.`,
     data.currentUser
   );
   db.save(data);
+  notifyListingOwnerOfOffer(data, claimOffer, l).then(() => db.save(data));
+  notifyInboundMessage(data, msg, thread).then(() => db.save(data));
   alert("Claimed. Coordinate pickup with the poster before the window ends.");
   goThread(thread.id);
 }
@@ -3238,6 +3840,7 @@ function accountHTML(data) {
         }</button>
       </div>
       <p class="help" style="margin-top:8px">Moved? Update city/ZIP here. Change or remove your profile photo anytime.</p>
+      ${notificationsPanelHTML(me)}
       <div class="panel account-signout">
         <h3 style="margin-top:0;font-size:16px">Sign out</h3>
         <p class="help" style="margin-top:0">Ends this session only. Your listings, messages, and profile photo stay in this browser — sign in again with the same email to restore them.</p>
@@ -3320,7 +3923,8 @@ function resetDemo() {
     avatarDraft: undefined,
     profileNotice: null,
     reportTarget: null,
-    filtersOpen: false
+    filtersOpen: false,
+    notifSoftPromptHidden: false
   };
   render();
 }
