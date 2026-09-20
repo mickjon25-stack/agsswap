@@ -60,7 +60,7 @@ Browser-only auth. On first visit — or after **Log out** / **Reset demo data**
 
 Roles: **Hobby farm** (like RenoSwap Homeowner) and **Ranch / Farm** badge (like Contractor). Admin demo user kept.
 
-**Profile picture** — Account → Edit profile → upload a photo (resized/compressed for localStorage) or use initials. Avatars show on Account, listing posters, messages, and swap offers.
+**Profile picture & location** — Account → **Edit photo & location** → upload/remove a photo (resized for localStorage), or update city/ZIP. Saving a new ZIP also updates near-me browse (`searchZip`). If city/ZIP changed, you can push the new location onto your Draft / Pending Review / Approved / Claimed listings. Avatars show on Account, listing posters, messages, and swap offers.
 
 **Sign out** — Account (and topbar) clears the session only (`currentUser = null`). Listings, users, messages, and avatars stay; Sign in restores that user.
 

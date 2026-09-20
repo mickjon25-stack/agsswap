@@ -562,6 +562,7 @@ let state = {
   authScreen: "welcome", // welcome | create | signin | demo
   editingProfile: false,
   avatarDraft: undefined, // undefined = use saved; "" = cleared; data URL = new
+  profileNotice: null, // brief ok message after saving profile
   reportTarget: null, // { kind, listingId?, userId? } | null
   filtersOpen: false // mobile browse filters disclosure
 };
@@ -1794,6 +1795,10 @@ function submitEditProfile(e) {
     alert("That email is already used by another demo account.");
     return;
   }
+  const prevCity = String(me.city || "").trim();
+  const prevZip = String(me.zip || "").trim();
+  const locationChanged = city !== prevCity || zip !== prevZip;
+
   me.name = name;
   me.email = email;
   me.city = city;
@@ -1813,9 +1818,35 @@ function submitEditProfile(e) {
     }
     me.password = demoHash(newPw);
   }
+
+  // Near-me browse follows the profile ZIP after a move
+  state.searchZip = zip;
+
+  let listingsUpdated = 0;
+  if (locationChanged) {
+    const syncStatuses = new Set(["Draft", "Pending Review", "Approved", "Claimed"]);
+    const mine = data.listings.filter(
+      (l) => l.poster === me.id && syncStatuses.has(l.status)
+    );
+    if (
+      mine.length &&
+      confirm("Update city/ZIP on your active listings too?")
+    ) {
+      mine.forEach((l) => {
+        l.city = city;
+        l.zip = zip;
+        listingsUpdated += 1;
+      });
+    }
+  }
+
   db.save(data);
   state.editingProfile = false;
   state.avatarDraft = undefined;
+  state.profileNotice =
+    listingsUpdated > 0
+      ? `Profile saved. Updated city/ZIP on ${listingsUpdated} listing${listingsUpdated === 1 ? "" : "s"}.`
+      : "Profile saved.";
   render();
 }
 
@@ -3105,6 +3136,8 @@ function hideListing(id) {
 function accountHTML(data) {
   const me = data.users[data.currentUser];
   const count = activeCount(data, data.currentUser);
+  const profileNotice = state.profileNotice;
+  if (profileNotice && !state.editingProfile) state.profileNotice = null;
   const cancelWarn =
     me.subscribed && count > 3
       ? `<div class="warn">If you cancel while you have more than 3 active listings, new posts stay blocked until you drop to 3 or resubscribe.</div>`
@@ -3162,10 +3195,10 @@ function accountHTML(data) {
           <div class="field" id="editCompanyField" style="display:${me.contractor ? "block" : "none"}"><label>Ranch / farm name</label>
             <input name="company" maxlength="80" value="${escapeAttr(me.company || "")}" />
           </div>
-          <div class="field"><label>City *</label>
+          <div class="field"><label>City / town *</label>
             <input name="city" required maxlength="60" value="${escapeAttr(me.city || "")}" />
           </div>
-          <div class="field"><label>ZIP * (Texas)</label>
+          <div class="field"><label>ZIP (Texas) * — used for near-me</label>
             <input name="zip" required maxlength="5" pattern="\\d{5}" inputmode="numeric" value="${escapeAttr(me.zip || "")}" />
           </div>
           <div class="field"><label>Short bio</label>
@@ -3192,13 +3225,19 @@ function accountHTML(data) {
       <p>Subscription: ${me.subscribed ? "Active $3.99/month" : "Not subscribed"}</p>
       ${cancelWarn}
       ${blockedNote}
+      ${
+        profileNotice
+          ? `<div class="ok" style="margin-bottom:10px">${escapeHtml(profileNotice)}</div>`
+          : ""
+      }
       <div class="actions">
         <button class="ghost" onclick="go('mine')">My listings</button>
-        <button class="ghost" onclick="state.editingProfile=true; state.avatarDraft=undefined; render()">Edit profile</button>
+        <button class="primary" onclick="state.editingProfile=true; state.avatarDraft=undefined; state.profileNotice=null; render()">Edit photo &amp; location</button>
         <button class="primary" onclick="toggleSub()">${
           me.subscribed ? "Cancel extra-listing plan" : "Upgrade $3.99/month"
         }</button>
       </div>
+      <p class="help" style="margin-top:8px">Moved? Update city/ZIP here. Change or remove your profile photo anytime.</p>
       <div class="panel account-signout">
         <h3 style="margin-top:0;font-size:16px">Sign out</h3>
         <p class="help" style="margin-top:0">Ends this session only. Your listings, messages, and profile photo stay in this browser — sign in again with the same email to restore them.</p>
@@ -3279,6 +3318,7 @@ function resetDemo() {
     authScreen: "welcome",
     editingProfile: false,
     avatarDraft: undefined,
+    profileNotice: null,
     reportTarget: null,
     filtersOpen: false
   };
