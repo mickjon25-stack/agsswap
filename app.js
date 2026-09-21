@@ -1,5 +1,14 @@
 /* AgsSwap — Texas-first farm & ranch marketplace (browser-only demo).
    Sister app to RenoSwap; separate localStorage key so data never collides. */
+(function () {
+  try {
+    var h = location.hostname;
+    if ((h === "agsswap.com" || h === "www.agsswap.com") && location.protocol === "http:") {
+      location.replace("https://" + location.host + location.pathname + location.search + location.hash);
+    }
+  } catch (e) { /* ignore */ }
+})();
+
 const CATEGORIES = [
   "Tractors & machinery",
   "Tractor implements",
@@ -561,6 +570,38 @@ const db = {
     localStorage.setItem("agsswap_db", JSON.stringify(data));
   }
 };
+
+
+const LAST_EMAIL_KEY = "agsswap_last_email";
+
+function getLastEmail() {
+  try {
+    return String(localStorage.getItem(LAST_EMAIL_KEY) || "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+function rememberLastEmail(email) {
+  const v = String(email || "").trim().toLowerCase();
+  if (!v) return;
+  try {
+    localStorage.setItem(LAST_EMAIL_KEY, v);
+  } catch (e) { /* ignore quota */ }
+}
+
+/** Prefer Sign in when returning visitors / custom profiles exist (seeds alone keep Create primary). */
+function preferSignInPrimary(data) {
+  if (getLastEmail()) return true;
+  const seedIds = new Set(Object.keys(USERS));
+  const users = (data && data.users) || {};
+  for (const id of Object.keys(users)) {
+    const u = users[id];
+    if (!u) continue;
+    if (!seedIds.has(id) && u.email) return true;
+  }
+  return false;
+}
 
 let state = {
   view: "browse",
@@ -2122,13 +2163,19 @@ function authHTML(data) {
   if (screen === "create") return authCreateHTML();
   if (screen === "signin") return authSignInHTML(data);
   if (screen === "demo") return authDemoHTML();
+  const preferSignIn = preferSignInPrimary(data);
+  const primaryBtn = preferSignIn
+    ? `<button class="primary" onclick="setAuthScreen('signin')">Sign in</button>
+        <button class="ghost" onclick="setAuthScreen('create')">Create profile</button>`
+    : `<button class="primary" onclick="setAuthScreen('create')">Create profile</button>
+        <button class="ghost" onclick="setAuthScreen('signin')">Sign in</button>`;
   return `
     <section class="hero auth-hero">
       <h2>Welcome to AgsSwap</h2>
       <p>Texas-first farm &amp; ranch marketplace — swap first, sell when you need to, Fast &amp; Free when the pile must go. Browser demo only (no real backend).</p>
+      <p class="help" style="margin-top:10px;color:#e6d7c4">Already have a profile in this browser? Sign in — don’t create again.</p>
       <div class="actions auth-actions">
-        <button class="primary" onclick="setAuthScreen('create')">Create profile</button>
-        <button class="ghost" onclick="setAuthScreen('signin')">Sign in</button>
+        ${primaryBtn}
         <button class="ghost" onclick="setAuthScreen('demo')">Continue as demo user</button>
       </div>
       <p class="help" style="margin-top:14px;color:#e6d7c4">Passwords are demo-only and stored in localStorage — not secure.</p>
@@ -2181,6 +2228,7 @@ function toggleAuthContractorFields(role) {
 }
 
 function authSignInHTML(data) {
+  const prefill = escapeAttr(getLastEmail());
   return `
     <div class="panel auth-panel">
       <button class="ghost" onclick="setAuthScreen('welcome')">← Back</button>
@@ -2189,7 +2237,7 @@ function authSignInHTML(data) {
       <div class="warn">Demo only — not real authentication.</div>
       <form onsubmit="submitSignIn(event)">
         <div class="field"><label>Email</label>
-          <input name="email" type="email" required maxlength="120" />
+          <input name="email" type="email" required maxlength="120" value="${prefill}" autocomplete="username" />
         </div>
         <div class="field"><label>Password</label>
           <input name="password" type="password" required maxlength="64" autocomplete="current-password" />
@@ -2249,6 +2297,7 @@ function enterSession(data, userId) {
   state.avatarDraft = undefined;
   state.authScreen = "welcome";
   const u = data.users[userId];
+  if (u && u.email) rememberLastEmail(u.email);
   state.searchZip = (u && u.zip) || null;
   render();
   window.scrollTo(0, 0);
@@ -2283,7 +2332,10 @@ function submitCreateProfile(e) {
     return;
   }
   if (findUserByEmail(data, email)) {
-    alert("That email is already registered in this browser. Sign in instead.");
+    alert("Account exists — sign in instead");
+    rememberLastEmail(email);
+    state.authScreen = "signin";
+    render();
     return;
   }
   const id = uid("u");
@@ -2341,9 +2393,12 @@ function loginAsDemo(userId) {
 function logout() {
   const data = db.get();
   // Session only — keep listings, users (incl. avatars), messages, offers.
+  // currentUser is the only session flag; clearing it is the only sign-out path.
+  const me = data.currentUser && data.users[data.currentUser];
+  if (me && me.email) rememberLastEmail(me.email);
   data.currentUser = null;
   db.save(data);
-  state.authScreen = "welcome";
+  state.authScreen = "signin";
   state.editingProfile = false;
   state.avatarDraft = undefined;
   state.view = "browse";
@@ -3841,6 +3896,7 @@ function accountHTML(data) {
       </div>
       <p class="help" style="margin-top:8px">Moved? Update city/ZIP here. Change or remove your profile photo anytime.</p>
       ${notificationsPanelHTML(me)}
+      <p class="help" style="margin-top:12px">You stay signed in on this device until you Sign out.</p>
       <div class="panel account-signout">
         <h3 style="margin-top:0;font-size:16px">Sign out</h3>
         <p class="help" style="margin-top:0">Ends this session only. Your listings, messages, and profile photo stay in this browser — sign in again with the same email to restore them.</p>
