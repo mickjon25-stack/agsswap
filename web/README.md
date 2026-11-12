@@ -54,6 +54,7 @@ Checks: `npm run lint`, `npm run build`, `npm test`.
 | `…0700_account_deletion` | `prepare_account_deletion` |
 | `…0800_storage` | `avatars` (public, 1 MB) + `listing-photos` (private, signed URLs) buckets and policies |
 | `…0900_lockdown_and_verify_grants` | revoke EXECUTE on internal functions, drop pg_graphql, **grant audit that aborts on any gap** |
+| `…1000_rls_initplan_and_fk_indexes` | performance-advisor fixes: `(select auth.uid())` in policies, indexes on foreign keys |
 
 **Supabase Data API grants (since 2026-10-30):** new `public` tables get no
 automatic grants. Every table/view above has explicit `grant`s for exactly the

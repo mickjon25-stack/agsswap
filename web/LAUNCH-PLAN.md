@@ -37,7 +37,7 @@ hello@agsswap.com yet).
      no leaked-password protection. Upgrade to **Pro ($25/mo per org + compute)**
      at launch if AgsSwap goes public; Pro is org-wide, so it would also cover RenoSwap.
 2. SQL editor → run each file in `web/supabase/migrations/` **in filename order**
-   (0100 → 0900). 0900 raises an error and rolls back if any grant/RLS is missing.
+   (0100 → 1000). 0900 raises an error and rolls back if any grant/RLS is missing.
 3. SQL editor → run `web/supabase/seed/zip_centroids.sql` (1 MB, 33,791 ZIPs).
 4. Authentication → URL Configuration:
    - Site URL `https://agsswap.com`
