@@ -9,6 +9,9 @@ export const runtime = "nodejs";
 
 /** Called by the admin page after approving a listing. Emails members whose saved alerts match (never the poster). */
 export async function POST(req: Request) {
+  // No email provider configured (e.g. preview without Resend): nothing to do.
+  // Checked first so a missing service-role key can't turn this into a 500.
+  if (!emailEnabled()) return NextResponse.json({ sent: false, reason: "email not configured" });
   const { listingId } = (await req.json().catch(() => ({}))) as { listingId?: string };
   if (!listingId || !/^[0-9a-f-]{36}$/i.test(listingId)) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });

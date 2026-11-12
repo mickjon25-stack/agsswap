@@ -14,6 +14,9 @@ type Event = "requested" | "confirmed";
  * Respects message_alerts (same toggle as offers/messages). No message body.
  */
 export async function POST(req: Request) {
+  // No email provider configured (e.g. preview without Resend): nothing to do.
+  // Checked first so a missing service-role key can't turn this into a 500.
+  if (!emailEnabled()) return NextResponse.json({ sent: false, reason: "email not configured" });
   const body = (await req.json().catch(() => ({}))) as {
     tradeId?: string;
     event?: Event;

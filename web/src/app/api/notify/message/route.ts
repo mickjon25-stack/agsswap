@@ -14,6 +14,9 @@ export const runtime = "nodejs";
  * never included in the email.
  */
 export async function POST(req: Request) {
+  // No email provider configured (e.g. preview without Resend): nothing to do.
+  // Checked first so a missing service-role key can't turn this into a 500.
+  if (!emailEnabled()) return NextResponse.json({ sent: false, reason: "email not configured" });
   const { threadId } = (await req.json().catch(() => ({}))) as { threadId?: string };
   if (!threadId || !/^[0-9a-f-]{36}$/i.test(threadId)) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
