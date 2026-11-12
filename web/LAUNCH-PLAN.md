@@ -1,8 +1,14 @@
 # AgsSwap production launch plan
 
-Status (2026-11-12, America/Chicago): code is ready on branch `prod-app`
-(`web/`). **Nothing in the cloud has been created yet** and agsswap.com still
-serves the static demo from `master` via GitHub Pages. Each step below is
+Status (2026-11-12, America/Chicago): **cloud preview is live at
+https://agsswap.vercel.app** (Vercel project `agsswap`, team reno-swap, deploys
+branch `prod-app`). Supabase project `agsswap-prod` (ref `lrqdubydqlxtmhejbyua`,
+us-east-1, Free, $0/mo) has migrations 0100–1000 + ZIP seed applied. Stripe is
+TEST mode only (shared RenoSwap account; webhook `we_1Ub5mUJAkOER4xKvDfsaexm4`
+→ agsswap.vercel.app). Still missing: `SUPABASE_SERVICE_ROLE_KEY` in Vercel
+(blocks Stripe checkout/webhook, account deletion, email alerts), Supabase Auth
+URL config + custom SMTP (signup confirmation emails), Resend. agsswap.com
+still serves the static demo from `master` via GitHub Pages. Each step below is
 reversible until step 7 (DNS cutover), which has its own rollback.
 
 Mirrors exactly how RenoSwap is running today.
