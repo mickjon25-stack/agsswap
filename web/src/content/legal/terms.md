@@ -78,7 +78,7 @@ You deal with other users at your own risk. Use good judgment and read our [safe
 | Plan | Price | Active listings |
 |---|---|---|
 | Hobby farm | $4.99/month | up to 10 |
-| Ranch / Farm | $19.99/month | up to 25, plus a Ranch / Farm badge |
+| Ranch / Farm | $19/month | up to 25, plus a Ranch / Farm badge |
 
 **Listing boost:** **$1.99 one-time** per listing. A boosted listing is shown near the top of Browse for **7 days**.
 

@@ -3,7 +3,7 @@
 //   STRIPE_SECRET_KEY=sk_test_... node scripts/stripe-setup.mjs
 // Pass --live to allow an sk_live_ key (only when you're ready to take money).
 //
-// Products:  AgsSwap Hobby Farm ($4.99/mo) · AgsSwap Ranch & Farm ($19.99/mo) ·
+// Products:  AgsSwap Hobby Farm ($4.99/mo) · AgsSwap Ranch & Farm ($19/mo) ·
 //            AgsSwap Listing Boost ($1.99 one-time, 7 days near the top)
 const key = process.env.STRIPE_SECRET_KEY || "";
 const allowLive = process.argv.includes("--live");
@@ -14,7 +14,7 @@ if (!key.startsWith("sk_test_") && !(allowLive && key.startsWith("sk_live_"))) {
 
 const WANT = [
   { env: "STRIPE_PRICE_HOBBY", lookup: "agsswap_hobby", name: "AgsSwap Hobby Farm", amount: 499, interval: "month" },
-  { env: "STRIPE_PRICE_RANCH", lookup: "agsswap_ranch", name: "AgsSwap Ranch & Farm", amount: 1999, interval: "month" },
+  { env: "STRIPE_PRICE_RANCH", lookup: "agsswap_ranch", name: "AgsSwap Ranch & Farm", amount: 1900, interval: "month" },
   { env: "STRIPE_PRICE_BUMP", lookup: "agsswap_bump", name: "AgsSwap Listing Boost", amount: 199, interval: null },
 ];
 

@@ -6,7 +6,7 @@ export type PlanId = "free" | "hobby" | "ranch";
 export const FREE_LISTING_CAP = 3;
 /** Hobby farm $4.99/mo: raised cap beyond free. */
 export const HOBBY_LISTING_CAP = 10;
-/** Ranch / Farm $19.99/mo: higher listing cap + Ranch / Farm badge. */
+/** Ranch / Farm $19/mo: higher listing cap + Ranch / Farm badge. */
 export const RANCH_LISTING_CAP = 25;
 
 export const BUMP_PRICE_USD = 1.99;
@@ -27,7 +27,7 @@ export const PLAN_PRICES: Record<
   },
   ranch: {
     label: "Ranch / Farm",
-    priceLabel: "$19.99/mo",
+    priceLabel: "$19/mo",
     listingCap: RANCH_LISTING_CAP,
     blurb: `Up to ${RANCH_LISTING_CAP} active listings plus a Ranch / Farm badge.`,
   },

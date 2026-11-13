@@ -18,7 +18,7 @@ Launch steps (Supabase project, Vercel, Stripe, DNS): see **[LAUNCH-PLAN.md](./L
 | Categories | 16 reno categories | 13 farm & ranch categories, A–Z, plus Other (`src/lib/constants.ts`) |
 | Roles | Homeowner / Contractor / Admin | Hobby farm / Ranch / Farm / Admin |
 | Badge | `is_contractor` (teal) | `is_ranch` (barn-red "Ranch / Farm" pill); `company` = ranch/farm name |
-| Plans | `homeowner` $4.99, `contractor` $19 | `hobby` $4.99 (10 listings), `ranch` $19.99 (25 + badge); bump $1.99 |
+| Plans | `homeowner` $4.99, `contractor` $19 | `hobby` $4.99 (10 listings), `ranch` $19 (25 + badge); bump $1.99 |
 | Env | `STRIPE_PRICE_HOMEOWNER/CONTRACTOR` | `STRIPE_PRICE_HOBBY/RANCH` (+ `STRIPE_PRICE_BUMP`) |
 | Listing flag | `dumpster_bound` "Dumpster-bound" | `scrap_bound` "Headed for scrap" |
 | Legal | Terms / Privacy / Prohibited / Safety | Ag-adapted **DRAFTS** (livestock health, Coggins/scrapie, brands, no firearms, no restricted-use pesticides, no Rx/VFD drugs…), banner says attorney review needed |
@@ -90,7 +90,7 @@ update public.profiles set is_admin = true, role = 'Admin' where email = 'you@ex
 ## Stripe
 
 `STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs` creates/finds
-**AgsSwap Hobby Farm** ($4.99/mo), **AgsSwap Ranch & Farm** ($19.99/mo) and
+**AgsSwap Hobby Farm** ($4.99/mo), **AgsSwap Ranch & Farm** ($19/mo) and
 **AgsSwap Listing Boost** ($1.99 one-time) and prints the `STRIPE_PRICE_*` env
 vars. Webhook: `https://agsswap.com/api/stripe/webhook` with events
 `checkout.session.completed`, `customer.subscription.created|updated|deleted`.
