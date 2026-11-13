@@ -36,7 +36,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#2f6b4f",
+  themeColor: "#4f7a2a",
 };
 
 async function getProfile(): Promise<Profile | null> {

@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     ? `You won't get ${what} emails anymore. You can turn them back on anytime.`
     : "That link didn't work. You can change your email settings in your account.";
   return new NextResponse(
-    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgsSwap email settings</title></head><body style="font-family:Arial,sans-serif;background:#eef2ea;color:#1f1a14;padding:40px 16px;text-align:center"><div style="max-width:440px;margin:0 auto;background:#fffdf9;border:1px solid #d5e0d4;border-radius:16px;padding:24px"><img src="/logo-64.png" width="48" height="48" alt="AgsSwap"><h2 style="color:#1e4a35">${ok ? "You're unsubscribed" : "Hmm"}</h2><p>${body}</p><p><a href="${appUrl()}/alerts" style="color:#8b3a2a;font-weight:bold">Manage email alerts</a></p></div></body></html>`,
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgsSwap email settings</title></head><body style="font-family:Arial,sans-serif;background:#fbf6e9;color:#2a2116;padding:40px 16px;text-align:center"><div style="max-width:440px;margin:0 auto;background:#fffdf7;border:1px solid #ecdfc2;border-radius:16px;padding:24px"><img src="/logo-64.png" width="48" height="48" alt="AgsSwap"><h2 style="color:#2f4a19">${ok ? "You're unsubscribed" : "Hmm"}</h2><p>${body}</p><p><a href="${appUrl()}/alerts" style="color:#a8590c;font-weight:bold">Manage email alerts</a></p></div></body></html>`,
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   );
 }
